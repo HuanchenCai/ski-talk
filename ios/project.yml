@@ -1,19 +1,19 @@
-# XcodeGen spec: `brew install xcodegen && xcodegen generate` produces SkiPTT.xcodeproj
-name: SkiPTT
+# XcodeGen spec: `brew install xcodegen && xcodegen generate` produces SkiTalk.xcodeproj
+name: SkiTalk
 options:
   bundleIdPrefix: com.example
   deploymentTarget: { iOS: "17.0" }
   xcodeVersion: "15.0"
 targets:
-  SkiPTT:
+  SkiTalk:
     type: application
     platform: iOS
-    sources: [SkiPTT]
-    info: { path: SkiPTT/Info.plist }
-    entitlements: { path: SkiPTT/SkiPTT.entitlements }
+    sources: [SkiTalk]
+    info: { path: SkiTalk/Info.plist }
+    entitlements: { path: SkiTalk/SkiTalk.entitlements }
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.skiptt   # must match APNS_BUNDLE_ID on the server
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.skitalk   # must match APNS_BUNDLE_ID on the server
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic

@@ -1,4 +1,4 @@
-# Ski PTT — 滑雪用的轻量对讲（Push-to-Talk, PTT）
+# Ski Talk — 滑雪用的轻量对讲（Push-to-Talk, PTT）
 
 > 口袋里的手机 + 手套上的蓝牙按钮 + 头盔音响/耳机 = 一台不用再多带的对讲机。
 
@@ -61,30 +61,30 @@ node tools/e2e-web.mjs                # 两个无头 Chromium 真实录音编码
 浏览器端的麦克风和 WebCodecs 都要求 HTTPS，iOS 也应走 `wss://`。最省事的是一个带自动证书的反向代理（Caddy）+ 这个 Node 进程，或者 Docker：
 
 ```bash
-docker build -f server/Dockerfile -t ski-ptt .
-docker run -d -p 8080:8080 -v ski-ptt-data:/data \
+docker build -f server/Dockerfile -t ski-talk .
+docker run -d -p 8080:8080 -v ski-talk-data:/data \
   -e APNS_TEAM_ID=… -e APNS_KEY_ID=… -e APNS_KEY=/data/AuthKey.p8 \
-  -e APNS_BUNDLE_ID=com.example.skiptt -e APNS_SANDBOX=1 ski-ptt
+  -e APNS_BUNDLE_ID=com.example.skitalk -e APNS_SANDBOX=1 ski-talk
 ```
 
 不配置 `APNS_*` 时服务器照常工作，只是不发 iOS 唤醒推送（网页端不受影响）。
 
 ## iOS 端 Build
 
-1. `brew install xcodegen && cd ios && xcodegen generate`，打开 `SkiPTT.xcodeproj`（或新建 iOS App 工程，把 `ios/SkiPTT/*.swift` 拖进去，替换 Info.plist）。
+1. `brew install xcodegen && cd ios && xcodegen generate`，打开 `SkiTalk.xcodeproj`（或新建 iOS App 工程，把 `ios/SkiTalk/*.swift` 拖进去，替换 Info.plist）。
 2. Signing & Capabilities：加 **Push to Talk**、**Push Notifications**、Background Modes 勾选 *Push to Talk* 和 *Audio*。Push to Talk 能力需要在 Apple Developer 后台对 App ID 开启。
 3. 改 Bundle ID（与服务器 `APNS_BUNDLE_ID` 一致）；在 Developer 后台建一个 APNs Auth Key（.p8）给服务器。
 4. 真机运行（PushToTalk 框架在模拟器上不可用），填服务器地址、频道码、名字，加入。
 5. 不掏手机的几种接法：
    - 蓝牙 PTT 按钮 / 耳机键：配对后直接用，系统把播放/暂停键当作开始/结束发送。注意只支持标准媒体键的按钮；Zello 私有协议的按钮不行。
-   - Action Button：设置 → 操作按钮 → 快捷指令 → 「Toggle Talk (Ski PTT)」。只能切换，不能按住。
+   - Action Button：设置 → 操作按钮 → 快捷指令 → 「Toggle Talk (Ski Talk)」。只能切换，不能按住。
    - 锁屏 / 灵动岛：加入频道后系统自动提供。
 
 **诚实说明**：这里没有 Mac 和真机，iOS 代码经过人工核对但**没有编译和真机测试**。PushToTalk 框架的回调顺序、`AVAudioConverter` 的 Opus 编解码在真机上需要验证；服务器和网页端是真跑通的。
 
 ## 和 Zello 的关系
 
-| | Zello | Ski PTT |
+| | Zello | Ski Talk |
 |---|---|---|
 | 协议 | WebSocket JSON + 二进制 Opus 帧（公开 Channel API） | 同形状，字段精简，见 PROTOCOL.md |
 | 音频 | Opus 16 kHz、60 ms 帧、码率自动 | Opus 48 kHz、16 kbps；iOS 20 ms、Web 60 ms |

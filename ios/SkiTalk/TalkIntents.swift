@@ -7,8 +7,8 @@ import AppIntents
 /// The Action Button cannot do hold-to-talk, so this is a toggle: press to start,
 /// press again to stop (the relay also auto-stops after 30 s of silence/limit).
 struct ToggleTalkIntent: AppIntent {
-    static var title: LocalizedStringResource = "Toggle Talk (Ski PTT)"
-    static var description = IntentDescription("开始/结束对讲 Start or stop transmitting on the current Ski PTT channel.")
+    static var title: LocalizedStringResource = "Toggle Talk (Ski Talk)"
+    static var description = IntentDescription("开始/结束对讲 Start or stop transmitting on the current Ski Talk channel.")
     static var openAppWhenRun = false
 
     @MainActor
@@ -18,7 +18,7 @@ struct ToggleTalkIntent: AppIntent {
     }
 }
 
-struct SkiPTTShortcuts: AppShortcutsProvider {
+struct SkiTalkShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(intent: ToggleTalkIntent(), phrases: ["Talk with \(.applicationName)", "用 \(.applicationName) 对讲"], shortTitle: "Toggle Talk", systemImageName: "mic.fill")
     }

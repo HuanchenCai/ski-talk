@@ -1,4 +1,4 @@
-# Build from the repository root:  docker build -f server/Dockerfile -t ski-ptt .
+# Build from the repository root:  docker build -f server/Dockerfile -t ski-talk .
 FROM node:22-alpine
 WORKDIR /app/server
 COPY server/package.json server/package-lock.json* ./

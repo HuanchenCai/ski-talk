@@ -1,4 +1,4 @@
-# Ski PTT 线上协议 Wire protocol (v0.1)
+# Ski Talk 线上协议 Wire protocol (v0.1)
 
 借鉴 Zello 公开的 Channel API 的形状（JSON 控制帧 + 二进制音频帧），字段按我们自己的需要精简。
 

@@ -6,7 +6,7 @@
 //
 // Configure with env vars (all required for APNs to be active):
 //   APNS_TEAM_ID, APNS_KEY_ID, APNS_KEY (PEM contents or path to .p8),
-//   APNS_BUNDLE_ID (e.g. com.example.skiptt), APNS_SANDBOX=1 for dev builds.
+//   APNS_BUNDLE_ID (e.g. com.example.skitalk), APNS_SANDBOX=1 for dev builds.
 // Without them, pushes are logged and dropped, which is fine for web-only testing.
 
 import http2 from 'node:http2';

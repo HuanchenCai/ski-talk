@@ -2,5 +2,5 @@ node_modules/
 server/data/
 *.log
 .DS_Store
-ios/SkiPTT.xcodeproj/
+ios/SkiTalk.xcodeproj/
 ios/DerivedData/

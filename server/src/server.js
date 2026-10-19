@@ -1,4 +1,4 @@
-// Ski-PTT relay server.
+// Ski-Talk relay server.
 //
 // One process does everything a group needs:
 //   * WebSocket (JSON control + binary Opus packets) for live half-duplex talk
@@ -281,7 +281,7 @@ export async function createServer({ port = Number(process.env.PORT || 8080), da
 
   await new Promise((res) => server.listen(port, res));
   const addr = server.address();
-  log(`[ski-ptt] listening on http://localhost:${addr.port}  (ws: /ws, web client: /)`);
+  log(`[ski-talk] listening on http://localhost:${addr.port}  (ws: /ws, web client: /)`);
 
   return {
     port: addr.port,

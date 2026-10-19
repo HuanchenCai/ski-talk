@@ -9,7 +9,7 @@ import path from 'node:path';
 // playwright may be installed globally (e.g. /opt/node-tools) rather than locally
 const { chromium } = await import('playwright').catch(() => import('/opt/node-tools/node_modules/playwright/index.mjs'));
 
-const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skiptt-e2e-'));
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skitalk-e2e-'));
 const srv = await createServer({ port: 0, dataDir, log: () => {} });
 const base = `http://localhost:${srv.port}`;
 const browser = await chromium.launch({ channel: process.env.PW_CHANNEL || 'chromium', dumpio: Boolean(process.env.PW_DUMPIO), args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });

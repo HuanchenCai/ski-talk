@@ -1,4 +1,4 @@
-// Ski PTT browser client.
+// Ski Talk browser client.
 // Hold the big button (or a Bluetooth/headset play-pause key in toggle mode):
 //   mic → AudioWorklet (60 ms frames) → WebCodecs Opus encoder → WebSocket binary frames
 // Incoming: WebSocket binary frames → WebCodecs Opus decoder → scheduled playback.
@@ -23,12 +23,12 @@ const stats = window.__ptt = { sentPackets: 0, receivedPackets: 0, decodedSample
 
 // ----------------------------------------------------------------- settings
 const qs = new URLSearchParams(location.search);
-const saved = JSON.parse(localStorage.getItem('skiptt') || '{}');
+const saved = JSON.parse(localStorage.getItem('skitalk') || '{}');
 ui.server.value = qs.get('server') || saved.server || '';
 ui.channel.value = (qs.get('ch') || saved.channel || '').toUpperCase();
 ui.name.value = qs.get('name') || saved.name || '';
 ui.toggleMode.checked = Boolean(saved.toggle);
-const persist = () => localStorage.setItem('skiptt', JSON.stringify({ server: ui.server.value, channel: ui.channel.value, name: ui.name.value, toggle: ui.toggleMode.checked }));
+const persist = () => localStorage.setItem('skitalk', JSON.stringify({ server: ui.server.value, channel: ui.channel.value, name: ui.name.value, toggle: ui.toggleMode.checked }));
 
 const httpBase = () => (ui.server.value.trim() || location.origin).replace(/\/$/, '');
 const wsUrl = () => httpBase().replace(/^http/, 'ws') + '/ws';
@@ -246,7 +246,7 @@ function armMediaKeys() {
   if (!('mediaSession' in navigator) || silent) return;
   silent = new Audio(silentWavURL(1)); silent.loop = true; silent.volume = 0.01;
   silent.play().catch(() => {});
-  navigator.mediaSession.metadata = new MediaMetadata({ title: 'Ski PTT', artist: ui.channel.value });
+  navigator.mediaSession.metadata = new MediaMetadata({ title: 'Ski Talk', artist: ui.channel.value });
   const onKey = () => { talk.toggle(); try { navigator.mediaSession.playbackState = 'playing'; } catch {} };
   for (const a of ['play', 'pause', 'nexttrack', 'previoustrack']) { try { navigator.mediaSession.setActionHandler(a, onKey); } catch {} }
   log('媒体键已接管：蓝牙按钮/耳机键 = 对讲开关');

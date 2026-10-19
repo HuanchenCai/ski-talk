@@ -45,7 +45,7 @@ final class PTTController: NSObject, ObservableObject {
         let u = UUID(); UserDefaults.standard.set(u.uuidString, forKey: key); return u
     }
     private var descriptor: PTChannelDescriptor {
-        PTChannelDescriptor(name: "Ski PTT · \(Settings.shared.channelCode)", image: UIImage(named: "AppIcon"))
+        PTChannelDescriptor(name: "Ski Talk · \(Settings.shared.channelCode)", image: UIImage(named: "AppIcon"))
     }
 
     private override init() {
@@ -326,6 +326,6 @@ extension PTTController: PTChannelManagerDelegate {
 // MARK: - PTChannelRestorationDelegate
 extension PTTController: PTChannelRestorationDelegate {
     nonisolated func channelDescriptor(restoredChannelUUID: UUID) -> PTChannelDescriptor {
-        PTChannelDescriptor(name: "Ski PTT · \(Settings.shared.channelCode)", image: UIImage(named: "AppIcon"))
+        PTChannelDescriptor(name: "Ski Talk · \(Settings.shared.channelCode)", image: UIImage(named: "AppIcon"))
     }
 }

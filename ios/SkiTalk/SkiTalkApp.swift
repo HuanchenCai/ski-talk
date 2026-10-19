@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Ski PTT — a lightweight half-duplex walkie-talkie for the slopes.
+/// Ski Talk — a lightweight half-duplex walkie-talkie for the slopes.
 ///
 /// Architecture (see ../../README.md):
 ///   * Apple's PushToTalk framework owns the audio session, the lock-screen /
@@ -11,7 +11,7 @@ import SwiftUI
 ///   * Incoming talk arrives as an APNs push-to-talk push; we fetch the stored
 ///     message over HTTP and play it, then go back to sleep.
 @main
-struct SkiPTTApp: App {
+struct SkiTalkApp: App {
     // The channel manager must exist as early as possible after launch, otherwise
     // the system tears down restored channels. Creating the controller here does that.
     @StateObject private var ptt = PTTController.shared

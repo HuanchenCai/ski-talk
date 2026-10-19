@@ -36,7 +36,7 @@ const pkt = (streamId, payload) => {
 };
 
 test('join, talk, floor control, store-and-forward, HTTP fetch', async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skiptt-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skitalk-'));
   const srv = await createServer({ port: 0, dataDir, log: () => {} });
   try {
     const a = client(srv.port), b = client(srv.port);
@@ -108,7 +108,7 @@ test('join, talk, floor control, store-and-forward, HTTP fetch', async () => {
 });
 
 test('messages survive a restart', async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skiptt-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skitalk-'));
   let srv = await createServer({ port: 0, dataDir, log: () => {} });
   const a = client(srv.port); await a.open;
   await a.cmd({ cmd: 'join', channel: 'KEEP', name: 'A' });

@@ -13,7 +13,7 @@ struct ContentView: View {
                 if let e = ptt.lastError { Text(e).font(.footnote).foregroundStyle(.red) }
             }
             .padding()
-            .navigationTitle("Ski PTT")
+            .navigationTitle("Ski Talk")
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
         }
     }

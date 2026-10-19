@@ -1,5 +1,5 @@
 {
-  "name": "ski-ptt-server",
+  "name": "ski-talk-server",
   "version": "0.1.0",
   "description": "Lightweight half-duplex push-to-talk relay for skiing groups (store-and-forward, Opus over WebSocket).",
   "type": "module",
