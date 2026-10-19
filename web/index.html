@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0b1020">
+<title>Ski PTT</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="app">
+  <header>
+    <div class="brand">Ski PTT <span class="sub">雪场对讲 · 半双工 Half-duplex</span></div>
+    <div id="conn" class="pill off">未连接</div>
+  </header>
+
+  <section id="setup" class="card">
+    <label>服务器 Server <input id="server" placeholder="同源 (留空)" autocomplete="off"></label>
+    <label>频道码 Channel code <input id="channel" placeholder="例如 SNOW42" autocapitalize="characters" autocomplete="off"></label>
+    <label>你的名字 Name <input id="name" placeholder="名字" autocomplete="off"></label>
+    <div class="row">
+      <button id="join" class="primary">加入 Join</button>
+      <button id="newChannel">新建频道 New</button>
+    </div>
+    <p class="hint">提前建好群：一个人点“新建频道”，把频道码发给大家。</p>
+  </section>
+
+  <section id="talk" class="card hidden">
+    <div id="status" class="status">空闲 idle</div>
+    <button id="ptt" class="ptt" aria-label="按住说话 Hold to talk">
+      <span class="ptt-label">按住说话</span>
+      <span class="ptt-sub">Hold to talk</span>
+    </button>
+    <div class="row controls">
+      <label class="switch"><input type="checkbox" id="toggleMode"> 切换模式 Toggle（按一下开，再按关；蓝牙键/耳机键用这个）</label>
+      <label class="switch"><input type="checkbox" id="keepAwake"> 保持亮屏 Keep screen on</label>
+    </div>
+    <div class="members"><b>在线 Members:</b> <span id="members">–</span></div>
+    <details>
+      <summary>最近消息 History（点一条重放）</summary>
+      <ul id="history"></ul>
+    </details>
+    <button id="leave" class="ghost">离开 Leave</button>
+  </section>
+
+  <section class="card tips">
+    <b>怎么不掏手机：</b>蓝牙 PTT 按钮 / 耳机按键 → 手机收到“播放/暂停”媒体键 → 这里当作对讲开关（切换模式）。
+    空格键长按也可以说话。此网页版用于联调和安卓；iPhone 锁屏后台收听请用 iOS 原生 App（见仓库 ios/）。
+  </section>
+  <pre id="log" class="log"></pre>
+</main>
+<script src="app.js" type="module"></script>
+</body>
+</html>

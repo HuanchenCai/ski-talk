@@ -1,0 +1,23 @@
+# XcodeGen spec: `brew install xcodegen && xcodegen generate` produces SkiPTT.xcodeproj
+name: SkiPTT
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget: { iOS: "17.0" }
+  xcodeVersion: "15.0"
+targets:
+  SkiPTT:
+    type: application
+    platform: iOS
+    sources: [SkiPTT]
+    info: { path: SkiPTT/Info.plist }
+    entitlements: { path: SkiPTT/SkiPTT.entitlements }
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.skiptt   # must match APNS_BUNDLE_ID on the server
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - sdk: PushToTalk.framework
+      - sdk: AVFoundation.framework
+      - sdk: AppIntents.framework

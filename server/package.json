@@ -1,0 +1,17 @@
+{
+  "name": "ski-ptt-server",
+  "version": "0.1.0",
+  "description": "Lightweight half-duplex push-to-talk relay for skiing groups (store-and-forward, Opus over WebSocket).",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}
