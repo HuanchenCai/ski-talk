@@ -40,8 +40,9 @@ try {
   const box = await btn.boundingBox();
   await a.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await a.mouse.down();
-  await a.waitForFunction(() => window.__ptt.state === 'tx', null, { timeout: 5000 });
-  check(true, 'Anna took the floor (state=tx)');
+  // 'tx' is only entered once the microphone is open, so the 1.5 s below is all captured audio
+  await a.waitForFunction(() => window.__ptt.state === 'tx' && window.__ptt.micReady, null, { timeout: 10000 });
+  check(true, 'Anna took the floor with the mic ready (state=tx, micReady)');
 
   // Bo is blocked while Anna talks
   await b.waitForFunction(() => window.__ptt.state === 'rx', null, { timeout: 5000 });

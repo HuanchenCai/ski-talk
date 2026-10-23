@@ -19,7 +19,7 @@ const ui = {
 const log = (...a) => { const line = a.map((x) => typeof x === 'string' ? x : JSON.stringify(x)).join(' '); ui.log.textContent = (line + '\n' + ui.log.textContent).slice(0, 4000); console.log('[ptt]', ...a); };
 
 // Stats for automated tests and debugging
-const stats = window.__ptt = { sentPackets: 0, receivedPackets: 0, decodedSamples: 0, playedMessages: 0, state: 'idle', lastError: null };
+const stats = window.__ptt = { sentPackets: 0, receivedPackets: 0, decodedSamples: 0, playedMessages: 0, state: 'idle', micReady: false, lastError: null };
 
 // ----------------------------------------------------------------- settings
 const qs = new URLSearchParams(location.search);
@@ -83,13 +83,26 @@ const player = {
 
 // ----------------------------------------------------------------- audio in
 const mic = {
-  stream: null, node: null, encoder: null, ts: 0, streamId: 0, running: false,
-  async start(streamId) {
-    const c = player.ensure();
-    if (!this.stream) {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-      await c.audioWorklet.addModule('worklet.js');
+  stream: null, src: null, node: null, encoder: null, ts: 0, streamId: 0, running: false, ready: null,
+  // Open the microphone and load the capture worklet once (prompts for permission the first time).
+  // Called when joining a channel so the first press does not lose its first half second, and again
+  // before every stream in case the join-time attempt failed or the device went away.
+  prepare() {
+    if (this.ready && this.stream && this.stream.getAudioTracks().every((t) => t.readyState === 'ended')) { this.ready = null; this.stream = null; stats.micReady = false; }
+    if (!this.ready) {
+      this.ready = (async () => {
+        const c = player.ensure();
+        this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+        await c.audioWorklet.addModule('worklet.js');
+        stats.micReady = true;
+      })().catch((e) => { this.ready = null; this.stream = null; stats.micReady = false; throw e; });
     }
+    return this.ready;
+  },
+  // Synchronous: requires prepare() to have resolved. Capture begins on the next audio render quantum.
+  start(streamId) {
+    if (!this.stream) throw new Error('mic not prepared');
+    const c = player.ensure();
     this.streamId = streamId; this.ts = 0; this.running = true;
     this.encoder = new AudioEncoder({
       output: (chunk) => {
@@ -143,6 +156,7 @@ const net = {
       if (r.talking) onStart(r.talking);
       ui.setup.classList.add('hidden'); ui.talk.classList.remove('hidden');
       persist();
+      mic.prepare().catch((e) => log('麦克风暂不可用，按下时再试', String(e)));   // prewarm: permission + worklet
       history.replaceState(null, '', `?ch=${encodeURIComponent(r.channel)}&name=${encodeURIComponent(this.me.name)}${ui.server.value ? '&server=' + encodeURIComponent(ui.server.value) : ''}`);
     };
     ws.onmessage = (ev) => {
@@ -212,20 +226,30 @@ async function onMessage(m) {
 
 // ----------------------------------------------------------------- talk
 const talk = {
-  active: false, streamId: 0, starting: false,
+  active: false, streamId: 0, starting: false, abort: false,
   async start() {
     if (this.active || this.starting || !net.ws || net.ws.readyState !== 1) return;
-    this.starting = true;
+    this.starting = true; this.abort = false;
     player.ensure();
-    const r = await net.cmd({ cmd: 'start', codec: { name: 'opus', sample_rate: SR, channels: 1, frame_ms: FRAME_MS } });
+    // Ask for the floor and open the microphone at the same time; tx begins only once both are in hand,
+    // so the chime and the 'tx' state mean "every word from now on is captured".
+    let micErr = null;
+    const [r] = await Promise.all([
+      net.cmd({ cmd: 'start', codec: { name: 'opus', sample_rate: SR, channels: 1, frame_ms: FRAME_MS } }),
+      mic.prepare().catch((e) => { micErr = e; }),
+    ]);
     this.starting = false;
-    if (!r.ok) { setStatus('busy', r.error === 'busy' ? `${r.from} 占线，等一下` : r.error); player.chime(330, 120); return; }
+    const releaseFloor = () => net.ws?.readyState === 1 && net.ws.send(JSON.stringify({ cmd: 'stop', stream_id: r.stream_id }));
+    if (!r.ok) { if (!this.abort) { setStatus('busy', r.error === 'busy' ? `${r.from} 占线，等一下` : r.error); player.chime(330, 120); } return; }
+    if (this.abort) { releaseFloor(); return; }           // button was let go before we were ready
+    if (micErr) { log('mic failed', String(micErr)); setStatus('busy', '麦克风不可用'); player.chime(330, 120); releaseFloor(); return; }
+    try { mic.start(r.stream_id); } catch (e) { log('mic failed', String(e)); releaseFloor(); return; }
     this.active = true; this.streamId = r.stream_id; stats.state = 'tx';
     ui.ptt.classList.add('tx'); setStatus('tx', '🎙️ 发送中… 松开结束');
     player.chime(1320, 50);
-    try { await mic.start(r.stream_id); } catch (e) { log('mic failed', String(e)); this.stop(); }
   },
   async stop() {
+    if (this.starting) { this.abort = true; return; }
     if (!this.active) return;
     this.active = false;
     await mic.stop();
