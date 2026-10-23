@@ -17,7 +17,7 @@ const $ = (id) => document.getElementById(id);
 const ui = {
   server: $('server'), channel: $('channel'), name: $('name'), join: $('join'), newChannel: $('newChannel'),
   setup: $('setup'), talk: $('talk'), status: $('status'), ptt: $('ptt'), toggleMode: $('toggleMode'), keepAwake: $('keepAwake'),
-  members: $('members'), history: $('history'), leave: $('leave'), conn: $('conn'), log: $('log'),
+  members: $('members'), history: $('history'), leave: $('leave'), conn: $('conn'), log: $('log'), outbox: $('outbox'), outbox: $('outbox'),
 };
 const log = (...a) => {
   const line = a.map((x) => typeof x === 'string' ? x : JSON.stringify(x)).join(' ');
@@ -27,7 +27,7 @@ const log = (...a) => {
 
 // Stats for automated tests and debugging
 const DEBUG = new URLSearchParams(location.search).get('debug') === '1';
-const stats = window.__ptt = { sentPackets: 0, receivedPackets: 0, decodedSamples: 0, playedMessages: 0, state: 'idle', micReady: false, lastError: null };
+const stats = window.__ptt = { sentPackets: 0, receivedPackets: 0, decodedSamples: 0, playedMessages: 0, state: 'idle', micReady: false, queued: 0, uploaded: 0, lastError: null };
 
 // ----------------------------------------------------------------- settings
 const qs = new URLSearchParams(location.search);
@@ -91,17 +91,22 @@ const player = {
 
 // ----------------------------------------------------------------- audio in
 const mic = {
-  stream: null, src: null, node: null, encoder: null, ts: 0, streamId: 0, running: false, ready: null,
-  // Open the microphone and load the capture worklet once (prompts for permission the first time).
-  // Called when joining a channel so the first press does not lose its first half second, and again
-  // before every stream in case the join-time attempt failed or the device went away.
+  stream: null, src: null, node: null, encoder: null, ts: 0, running: false, ready: null, worklet: null,
+  // The worklet module is fetched once at join on every platform, so recording still works when the
+  // network is gone later (the device itself is opened by prepare()).
+  loadWorklet() {
+    if (!this.worklet) this.worklet = player.ensure().audioWorklet.addModule('worklet.js').catch((e) => { this.worklet = null; throw e; });
+    return this.worklet;
+  },
+  // Open the microphone once (prompts for permission the first time). Called when joining a channel
+  // (not on iOS, see IOS) so the first press does not lose its first half second, and again before
+  // every transmission in case the join-time attempt failed or the device went away.
   prepare() {
     if (this.ready && this.stream && this.stream.getAudioTracks().every((t) => t.readyState === 'ended')) { this.ready = null; this.stream = null; stats.micReady = false; }
     if (!this.ready) {
       this.ready = (async () => {
-        const c = player.ensure();
+        await this.loadWorklet();
         this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-        await c.audioWorklet.addModule('worklet.js');
         stats.micReady = true;
         log('麦克风已打开');
       })().catch((e) => { this.ready = null; this.stream = null; stats.micReady = false; throw e; });
@@ -109,18 +114,18 @@ const mic = {
     return this.ready;
   },
   // Synchronous: requires prepare() to have resolved. Capture begins on the next audio render quantum.
-  start(streamId) {
+  // Every encoded Opus packet is handed to sink(payload); the caller decides whether it goes out live
+  // or into the offline buffer.
+  start(sink) {
     if (!this.stream) throw new Error('mic not prepared');
     const c = player.ensure();
-    this.streamId = streamId; this.ts = 0; this.running = true;
+    this.ts = 0; this.running = true;
     this.encoder = new AudioEncoder({
       output: (chunk) => {
         if (!this.running) return;
-        const out = new Uint8Array(9 + chunk.byteLength);
-        const dv = new DataView(out.buffer);
-        out[0] = 0x01; dv.setUint32(1, this.streamId); dv.setUint32(5, 0);
-        chunk.copyTo(out.subarray(9));
-        if (net.ws?.readyState === 1) { net.ws.send(out); stats.sentPackets++; }
+        const payload = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(payload);
+        sink(payload);
       },
       error: (e) => { stats.lastError = String(e); log('encoder error', String(e)); },
     });
@@ -172,7 +177,9 @@ const net = {
       if (r.talking) onStart(r.talking);
       ui.setup.classList.add('hidden'); ui.talk.classList.remove('hidden');
       persist();
-      if (!IOS) mic.prepare().catch((e) => log('麦克风暂不可用，按下时再试', String(e)));   // prewarm: permission + worklet (not on iOS, see IOS)
+      mic.loadWorklet().catch((e) => log('worklet 加载失败', String(e)));
+      if (!IOS) mic.prepare().catch((e) => log('麦克风暂不可用，按下时再试', String(e)));   // prewarm the device (not on iOS, see IOS)
+      outbox.flush();                                                                        // anything recorded while we were away
       history.replaceState(null, '', `?ch=${encodeURIComponent(r.channel)}&name=${encodeURIComponent(this.me.name)}${ui.server.value ? '&server=' + encodeURIComponent(ui.server.value) : ''}`);
     };
     ws.onmessage = (ev) => {
@@ -189,7 +196,7 @@ const net = {
     };
     ws.onclose = () => {
       setConn('off', '已断开');
-      if (talk.active) talk.stop();
+      if (talk.active) setStatus('tx', '📵 连接断开，离线录音中… 松开后排队发送');
       if (this.wantConnected) this.reconnectTimer = setTimeout(() => this.connect(), 2000);
     };
     ws.onerror = () => { stats.lastError = 'ws error'; };
@@ -241,40 +248,162 @@ async function onMessage(m) {
 }
 
 // ----------------------------------------------------------------- talk
+// Capture starts as soon as the microphone is open; the relay's floor is asked for in parallel.
+// Packets go out live once the floor is granted. Until then — and whenever the connection is gone —
+// they collect in `buffer`, and whatever is still buffered at release is queued in the outbox and
+// uploaded as a whole message when the network is back. So a press always records something.
+const CODEC = { name: 'opus', sample_rate: SR, channels: 1, frame_ms: FRAME_MS };
+const packetFrame = (streamId, payload) => {
+  const out = new Uint8Array(9 + payload.length);
+  const dv = new DataView(out.buffer);
+  out[0] = 0x01; dv.setUint32(1, streamId); dv.setUint32(5, 0);
+  out.set(payload, 9);
+  return out;
+};
 const talk = {
-  active: false, streamId: 0, starting: false, abort: false,
+  active: false, starting: false, abort: false,
+  live: false, streamId: 0, buffer: [], rec: null, floorPending: false,
   async start() {
-    if (this.active || this.starting || !net.ws || net.ws.readyState !== 1) return;
+    if (this.active || this.starting) return;
     this.starting = true; this.abort = false;
     player.ensure();
-    // Ask for the floor and open the microphone at the same time; tx begins only once both are in hand,
-    // so the chime and the 'tx' state mean "every word from now on is captured".
-    let micErr = null;
-    const [r] = await Promise.all([
-      net.cmd({ cmd: 'start', codec: { name: 'opus', sample_rate: SR, channels: 1, frame_ms: FRAME_MS } }),
-      mic.prepare().catch((e) => { micErr = e; }),
-    ]);
-    this.starting = false;
-    const releaseFloor = () => net.ws?.readyState === 1 && net.ws.send(JSON.stringify({ cmd: 'stop', stream_id: r.stream_id }));
-    if (!r.ok) { if (!this.abort) { setStatus('busy', r.error === 'busy' ? `${r.from} 占线，等一下` : r.error); player.chime(330, 120); } return; }
-    if (this.abort) { releaseFloor(); return; }           // button was let go before we were ready
-    if (micErr) { log('mic failed', String(micErr)); setStatus('busy', '麦克风不可用'); player.chime(330, 120); releaseFloor(); return; }
-    try { mic.start(r.stream_id); } catch (e) { log('mic failed', String(e)); releaseFloor(); return; }
-    this.active = true; this.streamId = r.stream_id; stats.state = 'tx';
-    ui.ptt.classList.add('tx'); setStatus('tx', '🎙️ 发送中… 松开结束');
-    player.chime(1320, 50);
+    try { await mic.prepare(); }
+    catch (e) { this.starting = false; log('mic failed', String(e)); setStatus('busy', '麦克风不可用'); player.chime(330, 120); return; }
+    if (this.abort) { this.starting = false; return; }           // button was let go before the mic was ready
+    const connected = net.ws?.readyState === 1 && !!net.me;
+    this.live = false; this.streamId = 0; this.buffer = []; this.rec = { ts: Date.now(), channel: ui.channel.value, name: net.me?.name || ui.name.value || 'anon', codec: CODEC };
+    try { mic.start((payload) => this.onPayload(payload)); }
+    catch (e) { this.starting = false; log('mic failed', String(e)); return; }
+    this.starting = false; this.active = true; stats.state = 'tx';
+    ui.ptt.classList.add('tx');
+    if (connected) { setStatus('tx', '🎙️ 发送中… 松开结束'); player.chime(1320, 50); this.requestFloor(); }
+    else { setStatus('tx', '📵 离线录音中… 松开后排队发送'); player.chime(990, 50); }
+  },
+  onPayload(payload) {
+    if (this.live && net.ws?.readyState === 1) { net.ws.send(packetFrame(this.streamId, payload)); stats.sentPackets++; }
+    else this.buffer.push(payload);
+  },
+  async requestFloor() {
+    this.floorPending = true;
+    const r = await net.cmd({ cmd: 'start', codec: CODEC });
+    this.floorPending = false;
+    if (r.ok) {
+      this.streamId = r.stream_id; this.live = true;
+      for (const p of this.buffer.splice(0)) this.onPayload(p);   // what was said while the relay was deciding
+      if (!this.active) this.finish();                            // already released: deliver, then close the stream
+      return;
+    }
+    if (r.error === 'busy') {                                     // someone else holds the floor: this press is void
+      this.buffer = []; this.rec = null;
+      if (this.active) { this.active = false; await mic.stop(); ui.ptt.classList.remove('tx'); stats.state = 'idle'; }
+      setStatus('busy', `${r.from} 占线，等一下`); player.chime(330, 120);
+      return;
+    }
+    // timeout or other failure: the network is not there; keep recording, deliver later
+    if (this.active) setStatus('tx', '📵 网络不通，离线录音中… 松开后排队发送');
+    else this.finish();
   },
   async stop() {
     if (this.starting) { this.abort = true; return; }
     if (!this.active) return;
     this.active = false;
-    await mic.stop();
-    net.ws?.readyState === 1 && net.ws.send(JSON.stringify({ cmd: 'stop', stream_id: this.streamId }));
+    await mic.stop();                                   // flushes the encoder: the last packets reach onPayload first
     ui.ptt.classList.remove('tx'); stats.state = 'idle';
     setStatus('', '空闲 idle');
+    if (this.floorPending) return;                      // requestFloor() calls finish() when the reply lands
+    this.finish();
+  },
+  finish() {
+    if (this.live && net.ws?.readyState === 1) {
+      for (const p of this.buffer.splice(0)) this.onPayload(p);
+      net.ws.send(JSON.stringify({ cmd: 'stop', stream_id: this.streamId }));
+    }
+    // Not live (never got the floor), or the connection died mid-stream (the relay keeps what it
+    // received; the rest goes out as a second message): queue what is buffered.
+    const left = this.buffer.splice(0);
+    if (left.length >= 2 && this.rec) outbox.add({ ...this.rec, packets: left });
+    this.live = false; this.rec = null;
   },
   toggle() { this.active ? this.stop() : this.start(); },
 };
+
+// ----------------------------------------------------------------- outbox
+// Messages recorded without the relay, persisted in IndexedDB so they survive a reload or a
+// crash, and uploaded whole (POST …/upload, our own packet framing) once the network is back.
+const outbox = {
+  db: null, flushing: false, timer: null,
+  open() {
+    if (this.db) return Promise.resolve(this.db);
+    return new Promise((res, rej) => {
+      const r = indexedDB.open('skitalk', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('outbox', { keyPath: 'id' });
+      r.onsuccess = () => res(this.db = r.result);
+      r.onerror = () => rej(r.error);
+    });
+  },
+  tx(mode, fn) {
+    return this.open().then((db) => new Promise((res, rej) => {
+      const t = db.transaction('outbox', mode); const req = fn(t.objectStore('outbox'));
+      t.oncomplete = () => res(req?.result); t.onerror = () => rej(t.error);
+    }));
+  },
+  all() { return this.tx('readonly', (s) => s.getAll()); },
+  remove(id) { return this.tx('readwrite', (s) => s.delete(id)); },
+  async add(rec) {
+    rec.id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    try { await this.tx('readwrite', (s) => s.put(rec)); }
+    catch (e) { log('离线消息无法保存', String(e)); return; }
+    log(`离线消息已排队：${(rec.packets.length * FRAME_MS / 1000).toFixed(1)} s`);
+    await this.refresh();
+    this.flush();
+  },
+  async refresh() {
+    let n = 0;
+    try { n = (await this.all()).length; } catch {}
+    stats.queued = n;
+    ui.outbox.textContent = n ? `📵 ${n} 条离线录音待发送，有网后自动补发` : '';
+    ui.outbox.classList.toggle('hidden', !n);
+  },
+  async flush() {
+    if (this.flushing) return;
+    this.flushing = true;
+    clearTimeout(this.timer);
+    try {
+      const list = (await this.all()).sort((a, b) => a.ts - b.ts);
+      for (const rec of list) {
+        let res;
+        try {
+          res = await fetch(`${httpBase()}/api/channels/${encodeURIComponent(rec.channel)}/upload`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/x-skitalk-packets',
+              'x-codec': `opus;sr=${rec.codec.sample_rate};ch=${rec.codec.channels};frame_ms=${rec.codec.frame_ms}`,
+              'x-from': encodeURIComponent(rec.name), 'x-platform': 'web', 'x-ts': String(rec.ts), 'x-client-id': rec.id,
+            },
+            body: framePackets(rec.packets),
+          });
+        } catch { this.later(10000); break; }                 // still no network
+        if (res.status === 409) { this.later(3000); break; }  // channel busy right now; try again shortly
+        if (res.ok) { await this.remove(rec.id); stats.uploaded++; log(`离线消息已补发：${(rec.packets.length * FRAME_MS / 1000).toFixed(1)} s`); continue; }
+        log('离线消息被服务器拒绝，已丢弃', res.status); await this.remove(rec.id);
+      }
+    } catch (e) { log('outbox', String(e)); }
+    finally { this.flushing = false; await this.refresh(); }
+  },
+  later(ms) { clearTimeout(this.timer); this.timer = setTimeout(() => this.flush(), ms); },
+};
+// [u16 BE length][opus packet]… — the same framing GET …/packets returns
+function framePackets(packets) {
+  const out = new Uint8Array(packets.reduce((n, p) => n + 2 + p.length, 0));
+  let o = 0;
+  for (const p of packets) { out[o] = p.length >> 8; out[o + 1] = p.length & 255; out.set(p, o + 2); o += 2 + p.length; }
+  return out;
+}
+window.addEventListener('online', () => outbox.flush());
+// The OS says the network is gone: don't wait for the relay's 30 s heartbeat to notice. Closing the
+// socket flips the UI to offline recording at once; the reconnect loop brings it back when it can.
+window.addEventListener('offline', () => { if (net.wantConnected) { log('系统报告离线'); net.ws?.close(); } });
+outbox.refresh();
 
 // Big button: hold (default) or toggle
 let holdPointer = null;

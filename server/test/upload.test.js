@@ -65,3 +65,56 @@ test('watch-style upload is transcoded, stored, broadcast and fetchable', { skip
     ws.close();
   } finally { await srv.close(); }
 });
+
+test('pre-encoded packet upload (offline queue) is stored without ffmpeg, deduped, and refused while busy', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skitalk-pk-'));
+  const srv = await createServer({ port: 0, dataDir, log: () => {} });
+  const base = `http://localhost:${srv.port}`;
+  // three fake 60 ms Opus packets in our own framing: [u16 BE len][packet]…
+  const pk = [Buffer.from([0xf8, 1, 2, 3]), Buffer.from([0xf8, 4, 5]), Buffer.from([0xf8, 6, 7, 8, 9])];
+  const body = Buffer.concat(pk.map((p) => Buffer.concat([Buffer.from([p.length >> 8, p.length & 255]), p])));
+  const headers = { 'content-type': 'application/x-skitalk-packets', 'x-codec': 'opus;sr=48000;ch=1;frame_ms=60', 'x-from': encodeURIComponent('Dan'), 'x-ts': String(Date.now() - 60_000), 'x-client-id': 'q-1' };
+  try {
+    const ws = new WebSocket(`ws://localhost:${srv.port}/ws`);
+    await new Promise((r) => ws.on('open', r));
+    const events = [];
+    ws.on('message', (d, bin) => { if (!bin) events.push(JSON.parse(d.toString())); });
+    ws.send(JSON.stringify({ seq: 1, cmd: 'join', channel: 'QUEUE1', name: 'Bo' }));
+    await new Promise((r) => setTimeout(r, 100));
+
+    const res = await fetch(`${base}/api/channels/queue1/upload`, { method: 'POST', headers, body });
+    assert.equal(res.status, 200);
+    const meta = await res.json();
+    assert.equal(meta.from.name, 'Dan');
+    assert.equal(meta.packets, 3);
+    assert.equal(meta.duration_ms, 180);
+    assert.deepEqual(meta.codec, { name: 'opus', sample_rate: 48000, channels: 1, frame_ms: 60 });
+    assert.ok(meta.ts < Date.now() - 50_000, 'x-ts is kept as the message time');
+    await new Promise((r) => setTimeout(r, 100));
+    assert.ok(events.some((e) => e.event === 'on_message' && e.message.id === meta.id), 'live listener told about it');
+
+    // the stored packets are byte-identical
+    const got = Buffer.from(await (await fetch(`${base}/api/messages/${meta.id}/packets`)).arrayBuffer());
+    assert.deepEqual(got, body);
+
+    // a retry with the same client id (lost response) does not duplicate
+    const again = await (await fetch(`${base}/api/channels/queue1/upload`, { method: 'POST', headers, body })).json();
+    assert.equal(again.id, meta.id);
+    const list = await (await fetch(`${base}/api/channels/queue1/messages`)).json();
+    assert.equal(list.messages.length, 1);
+
+    // bad codec header / empty packet list are rejected
+    assert.equal((await fetch(`${base}/api/channels/queue1/upload`, { method: 'POST', headers: { ...headers, 'x-codec': 'mp3', 'x-client-id': 'q-2' }, body })).status, 400);
+    assert.equal((await fetch(`${base}/api/channels/queue1/upload`, { method: 'POST', headers: { ...headers, 'x-client-id': 'q-3' }, body: Buffer.from([0, 0]) })).status, 400);
+
+    // while someone holds the floor the upload is refused with 409 (the client retries later)
+    ws.send(JSON.stringify({ seq: 2, cmd: 'start', codec: { sample_rate: 48000, frame_ms: 20 } }));
+    await new Promise((r) => setTimeout(r, 100));
+    const busy = await fetch(`${base}/api/channels/queue1/upload`, { method: 'POST', headers: { ...headers, 'x-client-id': 'q-4' }, body });
+    assert.equal(busy.status, 409);
+    assert.equal((await busy.json()).from, 'Bo');
+    ws.close();
+  } finally {
+    await srv.close();
+  }
+});

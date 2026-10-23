@@ -99,6 +99,35 @@ try {
   } else {
     console.log('skip upload test: ffmpeg not installed');
   }
+
+  // Offline queue: Dan loses the network, holds the button anyway, gets it back; the recording is
+  // uploaded whole and Bo hears it like any other message.
+  const dctx = await browser.newContext({ permissions: ['microphone'] });
+  const d = await dctx.newPage();
+  d.on('pageerror', (e) => console.log('[Dan pageerror]', e.message));
+  await d.goto(`${base}/?ch=E2E01&name=Dan&autojoin=1`);
+  await d.waitForFunction(() => document.getElementById('conn').classList.contains('on') && window.__ptt.micReady, null, { timeout: 10000 });
+  await dctx.setOffline(true);
+  await d.waitForFunction(() => !document.getElementById('conn').classList.contains('on'), null, { timeout: 10000 });
+  check(true, 'Dan went offline (relay connection dropped)');
+  const dbtn = await d.$('#ptt'); const db = await dbtn.boundingBox();
+  await d.mouse.move(db.x + db.width / 2, db.y + db.height / 2); await d.mouse.down();
+  await d.waitForFunction(() => window.__ptt.state === 'tx', null, { timeout: 5000 });
+  const offlineStatus = await d.$eval('#status', (e) => e.textContent);
+  check(/离线/.test(offlineStatus), `Dan is told he is recording offline: "${offlineStatus}"`);
+  await d.waitForTimeout(1200);
+  await d.mouse.up();
+  await d.waitForFunction(() => window.__ptt.queued === 1, null, { timeout: 5000 });
+  check(true, 'the offline recording is queued in the outbox');
+  const beforeDan = (await stats(b)).playedMessages;
+  await dctx.setOffline(false);
+  await d.waitForFunction(() => window.__ptt.uploaded === 1 && window.__ptt.queued === 0, null, { timeout: 15000 });
+  check(true, 'Dan reconnected and the queued recording was uploaded');
+  await b.waitForFunction((n) => window.__ptt.playedMessages > n, beforeDan, { timeout: 8000 });
+  const histDan = await b.$$eval('#history li', (els) => els.map((e) => e.textContent));
+  check(histDan[0].startsWith('Dan'), `Bo auto-played Dan's offline recording: ${histDan[0]}`);
+  const danMeta = (await (await fetch(`${base}/api/channels/E2E01/messages`)).json()).messages.find((m) => m.from.name === 'Dan');
+  check(danMeta && danMeta.packets >= 15, `Dan's upload holds ${danMeta?.packets} packets (>=15 for 1.2 s @ 60 ms)`);
 } catch (e) {
   console.log('FAIL exception', e);
   failures.push(String(e));

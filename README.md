@@ -31,6 +31,7 @@
 | 手机扬声器或蓝牙设备播放 | iOS 用系统音频路由（App 内有路由选择按钮）；蓝牙头盔音响、AirPods 都走系统。 |
 | 不掏手机触发 | iOS PushToTalk 框架：锁屏/灵动岛按钮、耳机播放键、蓝牙 PTT 按钮（`setAccessoryButtonEventsEnabled`）；Action Button 通过「Toggle Talk」快捷指令。浏览器端用媒体键。 |
 | 提前建群 | 一人 `POST /api/channels` 得到 6 位频道码，发给大家；雪场上只需打开 App 点加入。 |
+| 没信号也不丢话 | 按下就录：连不上中继时 Opus 包先存本地（网页端 IndexedDB），松开后排队，有网自动整条补发（`POST …/upload`，不经 ffmpeg）；对方当作一条录音自动播放。 |
 
 ## 目录 Layout
 
@@ -53,8 +54,9 @@ cd server && npm install && npm start          # http://localhost:8080
 自动化验证（本仓库已在 Linux 容器里跑通）：
 
 ```bash
-cd server && npm test                 # 协议 / 话语权 / 存储转发 / 重启恢复
-node tools/e2e-web.mjs                # 两个无头 Chromium 真实录音编码、互收、重放历史
+cd server && npm test                 # 协议 / 话语权 / 存储转发 / 重启恢复 / 离线包上传
+node tools/e2e-web.mjs                # 无头 Chromium 真实录音编码、互收、重放历史、断网录音后补发
+# 本机没装 playwright 时：npm i -g playwright 或在 tools/ 下 npm i playwright；用本机 Chrome 跑：PW_CHANNEL=chrome
 ```
 
 ## 部署 Deploy

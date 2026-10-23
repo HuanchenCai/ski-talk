@@ -49,10 +49,13 @@
 | GET | `/api/channels/:code/messages?after=<seq>&limit=` | 最近消息元数据 |
 | GET | `/api/messages/:id` | 单条元数据 |
 | GET | `/api/messages/:id/packets` | 二进制：重复 `[u16 BE 长度][Opus 包]`；响应头 `x-codec: opus;sr=48000;ch=1;frame_ms=20`、`x-from`、`x-duration-ms` |
-| POST | `/api/channels/:code/upload` | 整段录音上传（Apple Watch 用）。请求体为音频文件（m4a/aac/wav/ogg 等 ffmpeg 能读的），头 `content-type`、`x-from`（发送者名，URL 编码）、`x-platform`。服务器用 ffmpeg 转成 48 kHz/20 ms/16 kbps 的 Opus 包落盘，向在线成员广播 `on_message`，向睡着的设备发推送。频道占线返回 409 `{error:"busy", from}`，无法解码返回 415。 |
+| POST | `/api/channels/:code/upload` | 整段录音上传。头 `x-from`（发送者名，URL 编码）、`x-platform`，可选 `x-ts`（录音时刻，毫秒，48 h 内有效，作为消息时间）、`x-client-id`（客户端生成的唯一 id；因响应丢失而重试时，同一 id 直接返回首次存下的消息，不会重复）。两种请求体：(a) 音频文件（m4a/aac/wav/ogg 等 ffmpeg 能读的，`content-type` 写文件类型；Apple Watch 用），服务器用 ffmpeg 转成 48 kHz/20 ms/16 kbps 的 Opus 包；(b) `content-type: application/x-skitalk-packets`，请求体就是下面 GET `/packets` 的框格式 `[u16 BE 长度][Opus 包]…`，头 `x-codec: opus;sr=48000;ch=1;frame_ms=60` 描述这些包（客户端离线录好的 Opus 直接上传，不经 ffmpeg）。成功后向在线成员广播 `on_message`，向睡着的设备发推送。频道占线返回 409 `{error:"busy", from}`（客户端稍后重试），无法解码返回 415，`x-codec` 非法或没有包返回 400。 |
 | POST | `/api/devices` | `{channel, name, platform, token}` 注册推送设备 |
 
 消息保留 24 h，每频道最多 200 条。
+
+### 客户端离线排队 Client outbox
+按下说话时如果连不上中继（或 `start` 超时、连接中途断开），客户端照常录音编码，把 Opus 包攒在本地（网页端存 IndexedDB，刷新也不丢），松开后排队；网络恢复（重新 `join` 成功、系统 online 事件、或定时重试）后按录音时间顺序用上面的 (b) 方式整条上传，带 `x-ts` 和 `x-client-id`。对方收到的是一条 `on_message`，和手表上传一样自动播放。连接在发送中途断开时，中继保留已收到的部分为一条消息，剩余部分作为第二条排队上传。
 
 ## 唤醒推送 Wake-up push（iOS）
 消息完成后，服务器向频道内未在前台联机的 iOS 设备发 APNs：

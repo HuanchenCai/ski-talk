@@ -19,7 +19,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { Store, publicMeta, normalizeCode, frame } from './store.js';
+import { Store, publicMeta, normalizeCode, frame, unframe } from './store.js';
 import { Pusher } from './push.js';
 import { transcodeToOpusPackets } from './transcode.js';
 
@@ -101,24 +101,44 @@ export async function createServer({ port = Number(process.env.PORT || 8080), da
         const msg = store.get(m[1]);
         return msg ? send(200, publicMeta(msg)) : send(404, { error: 'not found' });
       }
-      // Whole-message upload (Apple Watch records locally, then posts the file).
-      // Body = audio file (m4a/aac/wav/ogg…); headers x-from (name, URL-encoded), x-platform.
+      // Whole-message upload. Two bodies are accepted:
+      //  - an audio file (m4a/aac/wav/ogg…; the Apple Watch records locally, then posts it) → ffmpeg → Opus
+      //  - content-type application/x-skitalk-packets: our own framing ([u16 BE len][opus]…), already
+      //    encoded by a client that recorded while offline, with x-codec describing the packets.
+      // Headers: x-from (name, URL-encoded), x-platform, x-ts (ms when recorded, optional),
+      // x-client-id (optional; a retry with the same id returns the message stored the first time).
       if ((m = url.pathname.match(/^\/api\/channels\/([^/]+)\/upload$/)) && req.method === 'POST') {
         const code = normalizeCode(m[1]);
         if (code.length < 3) return send(400, { error: 'bad channel code' });
         const from = decodeURIComponent(req.headers['x-from'] || 'watch').slice(0, 24);
+        const clientId = String(req.headers['x-client-id'] || '').slice(0, 64);
+        const seenKey = clientId && `${code}:${clientId}`;
+        if (seenKey && uploadsSeen.has(seenKey)) {
+          const prev = store.get(uploadsSeen.get(seenKey));
+          if (prev) return send(200, publicMeta(prev));          // retry after a lost response: same message
+        }
         const body = await readBodyBuffer(req, 8 * 1024 * 1024);
         if (!body.length) return send(400, { error: 'empty body' });
-        let packets;
-        try { packets = await transcodeToOpusPackets(body); }
-        catch (e) { log('[upload] transcode failed', e.message); return send(415, { error: 'cannot decode audio' }); }
-        if (!packets.length) return send(400, { error: 'no audio' });
         const r = room(code);
         if (r.talking) return send(409, { error: 'busy', from: r.talking.client.name });
-        const codec = { name: 'opus', sample_rate: 48000, channels: 1, frame_ms: 20 };
+        let packets, codec;
+        if (String(req.headers['content-type'] || '').startsWith('application/x-skitalk-packets')) {
+          codec = parseCodecHeader(req.headers['x-codec']);
+          if (!codec) return send(400, { error: 'bad x-codec' });
+          packets = unframe(body);
+          if (!packets.length || packets.some((p) => !p.length)) return send(400, { error: 'no audio' });
+        } else {
+          try { packets = await transcodeToOpusPackets(body); }
+          catch (e) { log('[upload] transcode failed', e.message); return send(415, { error: 'cannot decode audio' }); }
+          if (!packets.length) return send(400, { error: 'no audio' });
+          codec = { name: 'opus', sample_rate: 48000, channels: 1, frame_ms: 20 };
+        }
         const msg = store.begin(code, { id: 'upload', name: from }, codec);
+        const ts = Number(req.headers['x-ts']);
+        if (ts > Date.now() - 48 * 3600e3 && ts < Date.now() + 60e3) msg.ts = ts;   // when it was actually said
         for (const p of packets) store.append(msg, p);
         const meta = publicMeta(await store.finish(msg, packets.length * codec.frame_ms));
+        if (seenKey) { uploadsSeen.set(seenKey, msg.id); if (uploadsSeen.size > 500) uploadsSeen.delete(uploadsSeen.keys().next().value); }
         broadcast(r, { event: 'on_message', message: meta });   // live listeners fetch + play it
         wakeSleepers(r, meta);
         return send(200, meta);
@@ -312,6 +332,20 @@ export async function createServer({ port = Number(process.env.PORT || 8080), da
     store,
     close: () => new Promise((res) => { timers.forEach(clearInterval); for (const ws of wss.clients) ws.terminate(); wss.close(); server.close(() => res()); }),
   };
+}
+
+// x-client-id → message id of uploads already stored, so a client retrying after a lost
+// response (typical on a flaky slope network) does not create a duplicate.
+const uploadsSeen = new Map();
+
+/** 'opus;sr=48000;ch=1;frame_ms=60' (the x-codec format GET …/packets returns) → codec object, or null. */
+function parseCodecHeader(h) {
+  const [name, ...kv] = String(h || '').split(';').map((x) => x.trim());
+  if (name !== 'opus') return null;
+  const o = Object.fromEntries(kv.map((x) => x.split('=')));
+  const sample_rate = Number(o.sr), channels = Number(o.ch), frame_ms = Number(o.frame_ms);
+  if (![8000, 12000, 16000, 24000, 48000].includes(sample_rate) || ![1, 2].includes(channels) || !(frame_ms >= 2.5 && frame_ms <= 120)) return null;
+  return { name: 'opus', sample_rate, channels, frame_ms };
 }
 
 function readBodyBuffer(req, limit) {
