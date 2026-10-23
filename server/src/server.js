@@ -175,6 +175,7 @@ export async function createServer({ port = Number(process.env.PORT || 8080), da
           if (c.room && registerDevice(c.room.code, msg)) { c.deviceToken = msg.token; return reply({ ok: true }); }
           return reply({ ok: false, error: 'not joined or bad token' });
         case 'ping': return send({ event: 'pong', t: Date.now() });
+        case 'debug': return log(`[client ${c.name || '?'}@${c.platform || '?'}]`, String(msg.line).slice(0, 300));   // client-side log line, for field debugging
         default: return reply({ ok: false, error: 'unknown command' });
       }
     });

@@ -8,6 +8,9 @@ const SR = 48000;            // Opus native rate; WebCodecs requires it for opus
 const FRAME_MS = 60;         // Zello uses 60 ms frames too: fewer packets, less overhead
 const FRAME_SAMPLES = SR * FRAME_MS / 1000;
 const BITRATE = 16000;       // ~2 KB/s; voice stays intelligible on bad signal
+// iOS stops routing headset/AirPods media keys to a page while it holds the microphone, so on iOS
+// the mic is opened only for the duration of a transmission (and never prewarmed at join).
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const LEAD_MS = 120;         // playout buffer before the first packet is played
 
 const $ = (id) => document.getElementById(id);
@@ -16,9 +19,14 @@ const ui = {
   setup: $('setup'), talk: $('talk'), status: $('status'), ptt: $('ptt'), toggleMode: $('toggleMode'), keepAwake: $('keepAwake'),
   members: $('members'), history: $('history'), leave: $('leave'), conn: $('conn'), log: $('log'),
 };
-const log = (...a) => { const line = a.map((x) => typeof x === 'string' ? x : JSON.stringify(x)).join(' '); ui.log.textContent = (line + '\n' + ui.log.textContent).slice(0, 4000); console.log('[ptt]', ...a); };
+const log = (...a) => {
+  const line = a.map((x) => typeof x === 'string' ? x : JSON.stringify(x)).join(' ');
+  ui.log.textContent = (line + '\n' + ui.log.textContent).slice(0, 4000); console.log('[ptt]', ...a);
+  try { if (DEBUG && net.ws?.readyState === 1) net.ws.send(JSON.stringify({ cmd: 'debug', line })); } catch {}   // ?debug=1: mirror to the relay's console for field debugging
+};
 
 // Stats for automated tests and debugging
+const DEBUG = new URLSearchParams(location.search).get('debug') === '1';
 const stats = window.__ptt = { sentPackets: 0, receivedPackets: 0, decodedSamples: 0, playedMessages: 0, state: 'idle', micReady: false, lastError: null };
 
 // ----------------------------------------------------------------- settings
@@ -95,6 +103,7 @@ const mic = {
         this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
         await c.audioWorklet.addModule('worklet.js');
         stats.micReady = true;
+        log('麦克风已打开');
       })().catch((e) => { this.ready = null; this.stream = null; stats.micReady = false; throw e; });
     }
     return this.ready;
@@ -134,6 +143,13 @@ const mic = {
     try { this.node?.port.postMessage('stop'); this.src?.disconnect(); this.node?.disconnect(); } catch {}
     try { await this.encoder?.flush(); this.encoder?.close(); } catch {}
     this.encoder = null;
+    if (IOS) this.release();
+  },
+  // Let go of the microphone entirely; the next prepare() asks for it again.
+  release() {
+    try { this.stream?.getTracks().forEach((t) => t.stop()); } catch {}
+    this.stream = null; this.ready = null; stats.micReady = false;
+    log('麦克风已释放');
   },
 };
 
@@ -156,7 +172,7 @@ const net = {
       if (r.talking) onStart(r.talking);
       ui.setup.classList.add('hidden'); ui.talk.classList.remove('hidden');
       persist();
-      mic.prepare().catch((e) => log('麦克风暂不可用，按下时再试', String(e)));   // prewarm: permission + worklet
+      if (!IOS) mic.prepare().catch((e) => log('麦克风暂不可用，按下时再试', String(e)));   // prewarm: permission + worklet (not on iOS, see IOS)
       history.replaceState(null, '', `?ch=${encodeURIComponent(r.channel)}&name=${encodeURIComponent(this.me.name)}${ui.server.value ? '&server=' + encodeURIComponent(ui.server.value) : ''}`);
     };
     ws.onmessage = (ev) => {
@@ -281,10 +297,27 @@ let silent = null;
 function armMediaKeys() {
   if (!('mediaSession' in navigator) || silent) return;
   silent = new Audio(silentWavURL(1)); silent.loop = true; silent.volume = 0.01;
-  silent.play().catch(() => {});
+  silent.play().then(() => log('静音音轨播放中（媒体会话已持有）')).catch((e) => log('静音音轨播放失败，媒体键可能收不到', String(e)));
+  silent.addEventListener('playing', () => { if (!silent.__loggedPlaying) { silent.__loggedPlaying = true; log('静音音轨 playing'); } });
   navigator.mediaSession.metadata = new MediaMetadata({ title: 'Ski Talk', artist: ui.channel.value });
-  const onKey = () => { talk.toggle(); try { navigator.mediaSession.playbackState = 'playing'; } catch {} };
+  // One physical press can arrive as several actions: iOS pauses our silent track when the
+  // microphone opens and reports that as a 'pause', then a 'play' when it resumes. Treat
+  // everything inside the guard window as the same press, and keep the silent track playing
+  // so the media session (and the next press) stays ours.
+  const GUARD_MS = 800;
+  let lastKey = 0;
+  const keepAlive = () => { try { navigator.mediaSession.playbackState = 'playing'; } catch {} if (silent.paused) silent.play().catch(() => {}); };
+  const onKey = (d) => {
+    const now = performance.now();
+    const action = d?.action || '?';
+    if (now - lastKey < GUARD_MS) { log(`媒体键 ${action} 忽略（${Math.round(now - lastKey)} ms 内重复）`); keepAlive(); return; }
+    lastKey = now;
+    log(`媒体键 ${action} → ${talk.active ? '结束' : '开始'}`);
+    talk.toggle(); keepAlive();
+  };
   for (const a of ['play', 'pause', 'nexttrack', 'previoustrack']) { try { navigator.mediaSession.setActionHandler(a, onKey); } catch {} }
+  // iOS also pauses the element itself when the audio session changes; restart it without toggling.
+  silent.addEventListener('pause', () => setTimeout(() => { if (silent && silent.paused) silent.play().catch(() => {}); }, 300));
   log('媒体键已接管：蓝牙按钮/耳机键 = 对讲开关');
 }
 
