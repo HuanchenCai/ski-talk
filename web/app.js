@@ -153,6 +153,7 @@ const net = {
         case 'members': return renderMembers(o.members);
         case 'on_start': return onStart(o);
         case 'on_stop': return onStop(o);
+        case 'on_message': return onMessage(o.message);   // whole-message upload (e.g. from an Apple Watch)
         case 'error': return log('server error', o);
       }
     };
@@ -195,6 +196,17 @@ async function onStop(o) {
   if (o.message) { net.lastSeq = Math.max(net.lastSeq, o.message.seq); addHistory(o.message, true); if (!wasMine) stats.playedMessages++; }
   stats.state = 'idle';
   ui.ptt.classList.remove('busy'); ui.ptt.disabled = false;
+  if (!talk.active) setStatus('', '空闲 idle');
+}
+
+// A message that arrived complete (watch upload): list it and play it like live talk.
+async function onMessage(m) {
+  if (!m) return;
+  net.lastSeq = Math.max(net.lastSeq, m.seq);
+  addHistory(m, true);
+  if (m.from.name === net.me?.name) return;
+  setStatus('rx', `🔊 ${m.from.name}（录音）`);
+  await replay(m);
   if (!talk.active) setStatus('', '空闲 idle');
 }
 

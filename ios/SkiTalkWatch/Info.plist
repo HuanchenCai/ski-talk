@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key><string>Ski Talk</string>
+	<key>CFBundleShortVersionString</key><string>0.1.0</string>
+	<key>CFBundleVersion</key><string>1</string>
+	<key>WKApplication</key><true/>
+	<key>WKCompanionAppBundleIdentifier</key><string>com.example.skitalk</string>
+	<key>WKBackgroundModes</key>
+	<array><string>workout-processing</string></array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>捏两下时用手表录音发给队友。</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>记录滑雪运动，并让对讲在滑行中保持可用。</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>保存滑雪运动记录。</string>
+</dict>
+</plist>

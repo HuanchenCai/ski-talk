@@ -24,6 +24,7 @@
 | `members` | `members:[{id,name,platform,background,talking}]` |
 | `on_start` | `stream_id, from:{id,name}, codec, message_id` |
 | `on_stop` | `stream_id, message:MessageMeta\|null, reason` （空消息为 null） |
+| `on_message` | `message:MessageMeta`，一条没有经过直播、已经完整落盘的消息（来自上传）。在线客户端应拉取并自动播放 |
 | `error` | `error` |
 
 `MessageMeta = {id, channel, from:{id,name}, codec, ts, seq, duration_ms, packets}`
@@ -48,6 +49,7 @@
 | GET | `/api/channels/:code/messages?after=<seq>&limit=` | 最近消息元数据 |
 | GET | `/api/messages/:id` | 单条元数据 |
 | GET | `/api/messages/:id/packets` | 二进制：重复 `[u16 BE 长度][Opus 包]`；响应头 `x-codec: opus;sr=48000;ch=1;frame_ms=20`、`x-from`、`x-duration-ms` |
+| POST | `/api/channels/:code/upload` | 整段录音上传（Apple Watch 用）。请求体为音频文件（m4a/aac/wav/ogg 等 ffmpeg 能读的），头 `content-type`、`x-from`（发送者名，URL 编码）、`x-platform`。服务器用 ffmpeg 转成 48 kHz/20 ms/16 kbps 的 Opus 包落盘，向在线成员广播 `on_message`，向睡着的设备发推送。频道占线返回 409 `{error:"busy", from}`，无法解码返回 415。 |
 | POST | `/api/devices` | `{channel, name, platform, token}` 注册推送设备 |
 
 消息保留 24 h，每频道最多 200 条。

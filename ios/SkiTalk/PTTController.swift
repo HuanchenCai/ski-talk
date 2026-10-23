@@ -148,6 +148,9 @@ final class PTTController: NSObject, ObservableObject {
         case .stop(let sid, let message):
             if let message { history.insert(message, at: 0) }
             if sid == liveStreamID { liveStreamID = nil; playback?.finish() }
+        case .message(let m):
+            history.insert(m, at: 0)
+            if m.from.name != Settings.shared.displayName && m.from.name != WatchLink.shared.watchName { replay(m) }
         }
     }
 
@@ -211,6 +214,7 @@ extension PTTController: PTChannelManagerDelegate {
         Task { @MainActor in
             joined = true
             statusText = "已加入 \(Settings.shared.channelCode)"
+            WatchLink.shared.syncSettings()
             channelManager.setTransmissionMode(.halfDuplex, channelUUID: channelUUID) { _ in }
             channelManager.setAccessoryButtonEventsEnabled(true, channelUUID: channelUUID) { _ in }   // Bluetooth PTT buttons / headset keys
             channelManager.setServiceStatus(.ready, channelUUID: channelUUID) { _ in }
@@ -223,6 +227,7 @@ extension PTTController: PTChannelManagerDelegate {
             joined = false; transmitting = false
             statusText = "已离开"
             relay.disconnect()
+            WatchLink.shared.syncSettings()
         }
     }
 

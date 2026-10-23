@@ -37,7 +37,8 @@
 ```
 server/   Node.js 中继：WebSocket + HTTP + 存储 + APNs。有集成测试。
 web/      浏览器客户端（Chrome/Edge/安卓 Chrome；WebCodecs Opus）。用于联调和安卓。
-ios/      iOS 原生 App 源码（SwiftUI + PushToTalk 框架 + AVAudioConverter Opus）。
+ios/      iOS 原生 App 源码（SwiftUI + PushToTalk 框架 + AVAudioConverter Opus），
+          以及 Apple Watch 配套 App（SkiTalkWatch：Double Tap、运动会话、录音上传）。
 tools/    e2e-web.mjs：两个无头 Chromium 互相对讲的端到端测试。
 PROTOCOL.md  线上协议。
 ```
@@ -82,6 +83,20 @@ docker run -d -p 8080:8080 -v ski-talk-data:/data \
 
 **诚实说明**：这里没有 Mac 和真机，iOS 代码经过人工核对但**没有编译和真机测试**。PushToTalk 框架的回调顺序、`AVAudioConverter` 的 Opus 编解码在真机上需要验证；服务器和网页端是真跑通的。
 
+## Apple Watch 端：抬腕捏两下就说话
+
+`ios/SkiTalkWatch/` 是 watchOS 配套 App，目标是**全程不摸手机、不摸耳机、不摸表盘**：AirPods 戴在头盔里，抬腕捏两下（Double Tap）开始说，再捏两下发出。
+
+- **Double Tap**：主按钮带 `handGestureShortcut(.primaryAction)`，watchOS 11 起捏两下即触发。需要 Series 9 / Ultra 2 以后的手表。
+- **保持前台**：App 启动一个"高山滑雪"运动会话（HKWorkoutSession），watchOS 对运动类 App 抬腕即显示、不切回表盘、手垂下后仍在后台运行，顺带记录滑雪数据。
+- **两条发送路径，自动选择**：
+  1. 手机路径：通过 WatchConnectivity 让 iPhone 用 PushToTalk 框架发送，AirPods 麦克风收音（`ios/SkiTalk/WatchLink.swift`）。
+  2. 手表路径：iPhone 不可达或拒绝时，手表自己录 AAC（16 kHz 单声道），后台 URLSession 上传到 `/api/channels/:code/upload`，服务器 ffmpeg 转 Opus。没网先排队，有网自动补发；手机锁在柜子里、手表开蜂窝也能用。
+- **不用输入**：频道码、服务器、名字全部从 iPhone 同步过来。
+- **接收**：仍由 iPhone 收推送、AirPods 播放，和不戴手表时一样。
+
+要在真机上验证的三点：运动会话中手腕放下后录音是否持续；Ultra 的操作按钮能否在运动中转为对讲键；戴厚手套时捏两下的识别率。
+
 ## 和 Zello 的关系
 
 | | Zello | Ski Talk |
@@ -95,7 +110,7 @@ docker run -d -p 8080:8080 -v ski-talk-data:/data \
 
 ## 下一步 Roadmap
 
-- watchOS 配套 App：表盘一键对讲（录音经 WatchConnectivity 转发）。
+- watchOS 端真机验证与操作按钮接入。
 - Action Button 切换模式下的自动静音检测关麦（VAD）。
 - Android 原生（FCM 高优先级数据推送 + 前台服务）。
 - 位置共享（上传最后位置，随消息显示“谁在哪”）。

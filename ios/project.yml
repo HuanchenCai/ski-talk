@@ -1,9 +1,10 @@
 # XcodeGen spec: `brew install xcodegen && xcodegen generate` produces SkiTalk.xcodeproj
+# Targets: SkiTalk (iPhone) and SkiTalkWatch (Apple Watch companion, Double Tap to talk).
 name: SkiTalk
 options:
   bundleIdPrefix: com.example
-  deploymentTarget: { iOS: "17.0" }
-  xcodeVersion: "15.0"
+  deploymentTarget: { iOS: "17.0", watchOS: "11.0" }
+  xcodeVersion: "16.0"
 targets:
   SkiTalk:
     type: application
@@ -21,3 +22,20 @@ targets:
       - sdk: PushToTalk.framework
       - sdk: AVFoundation.framework
       - sdk: AppIntents.framework
+      - sdk: WatchConnectivity.framework
+      - target: SkiTalkWatch
+  SkiTalkWatch:
+    type: application
+    platform: watchOS
+    sources: [SkiTalkWatch]
+    info: { path: SkiTalkWatch/Info.plist }
+    entitlements: { path: SkiTalkWatch/SkiTalkWatch.entitlements }
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.skitalk.watchkitapp
+        SWIFT_VERSION: "5.9"
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - sdk: HealthKit.framework
+      - sdk: AVFoundation.framework
+      - sdk: WatchConnectivity.framework

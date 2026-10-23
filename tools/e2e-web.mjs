@@ -80,6 +80,24 @@ try {
   await c.waitForFunction(() => window.__ptt.playedMessages >= 1 && window.__ptt.decodedSamples > 0, null, { timeout: 5000 });
   const sc = await stats(c);
   check(sc.decodedSamples >= 15 * 2880, `late joiner decoded ${sc.decodedSamples} samples from stored message`);
+
+  // Watch path: a whole recording is uploaded; online clients fetch and auto-play it
+  const { execFileSync } = await import('node:child_process');
+  let haveFfmpeg = true; try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); } catch { haveFfmpeg = false; }
+  if (haveFfmpeg) {
+    const m4a = path.join(dataDir, 'watch.m4a');
+    execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=660:duration=1', '-ar', '16000', '-ac', '1', '-c:a', 'aac', m4a]);
+    const before = (await stats(b)).playedMessages;
+    const up = await fetch(`${base}/api/channels/E2E01/upload`, { method: 'POST', headers: { 'content-type': 'audio/mp4', 'x-from': 'Watch' }, body: fs.readFileSync(m4a) });
+    check(up.status === 200, `watch upload accepted (${up.status})`);
+    await b.waitForFunction((n) => window.__ptt.playedMessages > n, before, { timeout: 8000 });
+    const sb2 = await stats(b);
+    check(sb2.playedMessages === before + 1, `Bo auto-played the uploaded message (played=${sb2.playedMessages})`);
+    const hist2 = await b.$$eval('#history li', (els) => els.map((e) => e.textContent));
+    check(hist2[0].startsWith('Watch'), `upload is first in Bo's history: ${hist2[0]}`);
+  } else {
+    console.log('skip upload test: ffmpeg not installed');
+  }
 } catch (e) {
   console.log('FAIL exception', e);
   failures.push(String(e));

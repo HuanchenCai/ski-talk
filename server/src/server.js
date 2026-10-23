@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { Store, publicMeta, normalizeCode, frame } from './store.js';
 import { Pusher } from './push.js';
+import { transcodeToOpusPackets } from './transcode.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, '../../web');
@@ -99,6 +100,28 @@ export async function createServer({ port = Number(process.env.PORT || 8080), da
       if ((m = url.pathname.match(/^\/api\/messages\/([^/]+)$/))) {
         const msg = store.get(m[1]);
         return msg ? send(200, publicMeta(msg)) : send(404, { error: 'not found' });
+      }
+      // Whole-message upload (Apple Watch records locally, then posts the file).
+      // Body = audio file (m4a/aac/wav/ogg…); headers x-from (name, URL-encoded), x-platform.
+      if ((m = url.pathname.match(/^\/api\/channels\/([^/]+)\/upload$/)) && req.method === 'POST') {
+        const code = normalizeCode(m[1]);
+        if (code.length < 3) return send(400, { error: 'bad channel code' });
+        const from = decodeURIComponent(req.headers['x-from'] || 'watch').slice(0, 24);
+        const body = await readBodyBuffer(req, 8 * 1024 * 1024);
+        if (!body.length) return send(400, { error: 'empty body' });
+        let packets;
+        try { packets = await transcodeToOpusPackets(body); }
+        catch (e) { log('[upload] transcode failed', e.message); return send(415, { error: 'cannot decode audio' }); }
+        if (!packets.length) return send(400, { error: 'no audio' });
+        const r = room(code);
+        if (r.talking) return send(409, { error: 'busy', from: r.talking.client.name });
+        const codec = { name: 'opus', sample_rate: 48000, channels: 1, frame_ms: 20 };
+        const msg = store.begin(code, { id: 'upload', name: from }, codec);
+        for (const p of packets) store.append(msg, p);
+        const meta = publicMeta(await store.finish(msg, packets.length * codec.frame_ms));
+        broadcast(r, { event: 'on_message', message: meta });   // live listeners fetch + play it
+        wakeSleepers(r, meta);
+        return send(200, meta);
       }
       if (url.pathname === '/api/devices' && req.method === 'POST') {
         const body = JSON.parse(await readBody(req));
@@ -288,6 +311,15 @@ export async function createServer({ port = Number(process.env.PORT || 8080), da
     store,
     close: () => new Promise((res) => { timers.forEach(clearInterval); for (const ws of wss.clients) ws.terminate(); wss.close(); server.close(() => res()); }),
   };
+}
+
+function readBodyBuffer(req, limit) {
+  return new Promise((res, rej) => {
+    const chunks = []; let n = 0;
+    req.on('data', (c) => { n += c.length; if (n > limit) { req.destroy(); return rej(new Error('too large')); } chunks.push(c); });
+    req.on('end', () => res(Buffer.concat(chunks)));
+    req.on('error', rej);
+  });
 }
 
 function readBody(req) {

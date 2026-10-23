@@ -24,6 +24,7 @@ final class RelayClient: NSObject {
         case start(StartInfo)
         case packet(streamID: UInt32, packetID: UInt32, opus: Data)
         case stop(streamID: UInt32, message: MessageMeta?)
+        case message(MessageMeta)          // arrived complete (watch upload), not streamed live
     }
     struct StartInfo: Codable { var stream_id: UInt32; var from: MessageMeta.From; var codec: Codec; var message_id: String }
 
@@ -193,6 +194,12 @@ final class RelayClient: NSObject {
             if let e = try? dec.decode(E.self, from: data) {
                 if let m = e.message { lastSeq = max(lastSeq, m.seq) }
                 onEvent?(.stop(streamID: e.stream_id, message: e.message))
+            }
+        case "on_message":
+            struct E: Codable { var message: MessageMeta }
+            if let e = try? dec.decode(E.self, from: data) {
+                lastSeq = max(lastSeq, e.message.seq)
+                onEvent?(.message(e.message))
             }
         default: break
         }

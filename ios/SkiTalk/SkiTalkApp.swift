@@ -15,6 +15,7 @@ struct SkiTalkApp: App {
     // The channel manager must exist as early as possible after launch, otherwise
     // the system tears down restored channels. Creating the controller here does that.
     @StateObject private var ptt = PTTController.shared
+    private let watch = WatchLink.shared          // Apple Watch: Double Tap → toggle talk
 
     var body: some Scene {
         WindowGroup {
